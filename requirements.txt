@@ -12,4 +12,6 @@ pandas
 pytz
 Flask-WTF
 torch
+transformers
+
 
