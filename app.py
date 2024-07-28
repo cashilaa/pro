@@ -10,6 +10,7 @@ from functools import wraps
 from werkzeug.utils import secure_filename
 from PIL import Image
 import cv2
+from functools import wraps
 
 load_dotenv()
 
@@ -144,6 +145,27 @@ class BiasDetectionSystem:
         return random.sample(alternatives, 2)  # Return 2 random alternatives
 
 bias_system = BiasDetectionSystem()
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Assuming there is a function `current_user` that returns the logged-in user
+        if not current_user:
+            return redirect(url_for('login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def allowed_file(filename):
+    # Placeholder function to check allowed file extensions
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mov'}
+
+def resize_image(file_path):
+    # Placeholder function to resize image
+    pass
+
+def resize_video(file_path):
+    # Placeholder function to resize video
+    pass
 
 @app.route('/create_post', methods=['POST'])
 @login_required
