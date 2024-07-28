@@ -11,4 +11,5 @@ numpy
 pandas
 pytz
 Flask-WTF
+transformers
 
