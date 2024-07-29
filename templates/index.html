@@ -41,4 +41,56 @@
             </form>
         </div>
     {% endfor %}
+
+    <script>
+    document.getElementById('post-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        let formData = new FormData(this);
+        
+        fetch('{{ url_for("create_post") }}', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.violates_guidelines) {
+                // Display explanation and suggestions
+                let message = `${data.explanation}\n\nSuggestions:\n`;
+                data.suggestions.forEach((suggestion, index) => {
+                    message += `${index + 1}. ${suggestion}\n`;
+                });
+                
+                if (confirm(message + "\n\nWould you like to modify your post?")) {
+                    // User chose to modify, update the form content
+                    document.getElementById('content').value = data.suggestions[0];
+                } else {
+                    // User chose to post anyway, resubmit the original content
+                    formData.append('ignore_guidelines', 'true');
+                    fetch('{{ url_for("create_post") }}', {
+                        method: 'POST',
+                        body: formData
+                    }).then(response => response.json())
+                    .then(data => handlePostResponse(data));
+                }
+            } else {
+                handlePostResponse(data);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while submitting your post');
+        });
+    });
+
+    function handlePostResponse(data) {
+        if (data.success) {
+            alert(data.message);
+            // Reload the page or update the UI as needed
+            window.location.reload();
+        } else {
+            alert(data.error || 'An error occurred');
+        }
+    }
+    </script>
 {% endblock %}
