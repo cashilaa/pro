@@ -124,48 +124,6 @@ def logout():
     flash('Logged out successfully', 'success')
     return redirect(url_for('login'))
 
-class BiasDetectionSystem:
-    def __init__(self):
-        self.classifier = pipeline("text-classification", model="distilbert-base-uncased-finetuned-sst-2-english")
-        
-    def detect_bias(self, text):
-        result = self.classifier(text)[0]
-        # Assuming the model is fine-tuned to detect bias, where a high score indicates bias
-        return result['score'] > 0.7  # Adjust this threshold as needed
-    
-    def generate_alternatives(self, original_text):
-        # This is a placeholder. In a real system, you'd use a more sophisticated
-        # method to generate alternatives, possibly using a language model.
-        alternatives = [
-            f"Consider discussing {original_text} from multiple perspectives.",
-            f"How about sharing a fact-based observation about {original_text}?",
-            f"Maybe you could ask a question about {original_text} instead?",
-        ]
-        return random.sample(alternatives, 2)  # Return 2 random alternatives
-
-bias_system = BiasDetectionSystem()
-
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Assuming there is a function `current_user` that returns the logged-in user
-        if not current_user:
-            return redirect(url_for('login', next=request.url))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def allowed_file(filename):
-    # Placeholder function to check allowed file extensions
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mov'}
-
-def resize_image(file_path):
-    # Placeholder function to resize image
-    pass
-
-def resize_video(file_path):
-    # Placeholder function to resize video
-    pass
-
 @app.route('/create_post', methods=['POST'])
 @login_required
 def create_post():
@@ -186,42 +144,67 @@ def create_post():
             resize_image(file_path)
         elif media_type == 'video':
             resize_video(file_path)
-     
-    if bias_system.detect_bias(content):
-        alternatives = bias_system.generate_alternatives(content)
-        return render_template('post_alternatives.html', original=content, alternatives=alternatives)
+
+    # Use Gemini model to check for community guideline violations
+    prompt = f"""
+    Analyze the following text for any violations of community guidelines. 
+    If violations are found, provide a friendly explanation and suggest 3 alternative wordings.
+    Make the suggestions fun and engaging.
+    Text to analyze: "{content}"
     
-    print(f"Calling generate_and_check_content with: content={content}, user_id={g.user.id}")
-    result = bot.generate_and_check_content(content, g.user.id)
-    print(f"Result from generate_and_check_content: {result}")
-    
-    if result is None:
-        flash("An error occurred while processing your post. Please try again.", 'error')
-        return redirect(url_for('index'))
-    
-    success, message = result
-    if success:
-        new_post = Post(content=message, user_id=g.user.id, media_url=media_url, media_type=media_type)
-        db.session.add(new_post)
-        db.session.commit()
-        flash('Post created successfully', 'success')
-    else:
-        flash(message, 'error')
+    Respond in the following JSON format:
+    {{
+        "violates_guidelines": boolean,
+        "explanation": "string",
+        "suggestions": ["string"]
+    }}
+    """
+    try:
+        response = model.generate_content(prompt)
+        logger.debug(f"Gemini response text: {response.text}")
+        
+        # Extract JSON from the response
+        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        if json_match:
+            response_data = json.loads(json_match.group(0))
+        else:
+            raise ValueError("No valid JSON found in the response")
+        
+        logger.debug(f"Parsed response data: {response_data}")
+        if response_data.get('violates_guidelines', False):
+            # If guidelines are violated, return the explanation and suggestions
+            return jsonify({
+                'violates_guidelines': True,
+                'explanation': response_data.get('explanation', 'No explanation provided.'),
+                'suggestions': response_data.get('suggestions', [])
+            }), 200
+
+        # If we've reached this point, the content is okay to post
+        print(f"Calling generate_and_check_content with: content={content}, user_id={g.user.id}, media_url={media_url}")
+        result = bot.generate_and_check_content(content, g.user.id, media_url)
+        print(f"Result from generate_and_check_content: {result}")
+        
+        if result is None:
+            if media_url:
+                os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            return jsonify({'error': "An error occurred while processing your post. Please try again."}), 500
+        
+        success, message = result
+        if success:
+            new_post = Post(content=message, user_id=g.user.id, media_url=media_url, media_type=media_type)
+            db.session.add(new_post)
+            db.session.commit()
+            return jsonify({'success': True, 'message': 'Post created successfully'}), 200
+        else:
+            if media_url:
+                os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            return jsonify({'error': message}), 400
+
+    except Exception as e:
+        logger.error(f"Error processing or saving post: {str(e)}", exc_info=True)
         if media_url:
             os.remove(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-    
-    return redirect(url_for('index'))
-
-@app.route('/select_alternative', methods=['POST'])
-@login_required
-def select_alternative():
-    selected_content = request.form.get('selected_content')
-    # Create the post with the selected alternative content
-    new_post = Post(content=selected_content, user_id=g.user.id)
-    db.session.add(new_post)
-    db.session.commit()
-    flash('Post created successfully', 'success')
-    return redirect(url_for('index'))
+        return jsonify({'error': 'An error occurred while processing your post. Please try again.'}), 500
 
 @app.route('/like/<int:post_id>', methods=['POST'])
 @login_required
