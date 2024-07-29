@@ -10,7 +10,6 @@ from functools import wraps
 from werkzeug.utils import secure_filename
 from PIL import Image
 import cv2
-from functools import wraps
 
 load_dotenv()
 
